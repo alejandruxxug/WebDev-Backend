@@ -104,12 +104,14 @@ namespace SalaFinder.Services
 
             var weekEnd = weekStart.AddDays(7);
 
-            var reservations = await _context.Reservations
-                .Where(r => r.SpaceId == spaceId
-                    && r.Date >= weekStart
-                    && r.Date < weekEnd
-                    && (r.Status == ReservationStatus.Approved || r.Status == ReservationStatus.Pending))
+            // para que Sqlite funcione correctamente
+            var allReservations = await _context.Reservations
+                .Where(r => r.SpaceId == spaceId && r.Date >= weekStart && r.Date < weekEnd)
                 .ToListAsync();
+
+            var reservations = allReservations
+                .Where(r => r.Status == ReservationStatus.Approved || r.Status == ReservationStatus.Pending)
+                .ToList();
 
             var slots = new List<AvailabilitySlotDto>();
             var openTime = new TimeSpan(7, 0, 0);
@@ -144,13 +146,17 @@ namespace SalaFinder.Services
 
             var allSpaces = await GetAllAsync(filter);
 
-            var reservedSpaceIds = await _context.Reservations
-                .Where(r => r.Date.Date == filter.Date.Value.Date
-                    && r.StartTime < filter.EndTime.Value
+            // para que Sqlite funcione correctamente
+            var allReservations = await _context.Reservations
+                .Where(r => r.Date.Date == filter.Date.Value.Date)
+                .ToListAsync();
+
+            var reservedSpaceIds = allReservations
+                .Where(r => r.StartTime < filter.EndTime.Value
                     && r.EndTime > filter.StartTime.Value
                     && (r.Status == ReservationStatus.Approved || r.Status == ReservationStatus.Pending))
                 .Select(r => r.SpaceId)
-                .ToListAsync();
+                .ToList();
 
             return allSpaces.Where(s => !reservedSpaceIds.Contains(s.Id)).ToList();
         }
