@@ -483,3 +483,6 @@ $RECYCLE.BIN/
 
 *.db
 appsettings.Development.json
+
+# Claude Code
+.claude/
