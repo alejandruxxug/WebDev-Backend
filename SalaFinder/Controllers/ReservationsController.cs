@@ -38,7 +38,7 @@ namespace SalaFinder.Controllers
         }
 
         [HttpGet("{id}")]
-        public async Task<IActionResult> GetById(int id)
+        public async Task<IActionResult> GetById(Guid id)
         {
             var reservation = await _reservationService.GetByIdAsync(id);
             return reservation == null
@@ -48,7 +48,7 @@ namespace SalaFinder.Controllers
 
         [HttpGet("check-conflict")]
         public async Task<IActionResult> CheckConflict(
-            [FromQuery] int spaceId,
+            [FromQuery] Guid spaceId,
             [FromQuery] DateTime date,
             [FromQuery] TimeSpan startTime,
             [FromQuery] TimeSpan endTime)
@@ -82,7 +82,7 @@ namespace SalaFinder.Controllers
 
         [HttpPatch("{id}/status")]
         [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> UpdateStatus(int id, [FromBody] UpdateReservationStatusDto dto)
+        public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateReservationStatusDto dto)
         {
             var adminId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
             try
@@ -97,7 +97,7 @@ namespace SalaFinder.Controllers
         }
 
         [HttpDelete("{id}")]
-        public async Task<IActionResult> Cancel(int id)
+        public async Task<IActionResult> Cancel(Guid id)
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
             try
@@ -117,7 +117,7 @@ namespace SalaFinder.Controllers
 
         [HttpPost("{id}/no-show")]
         [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> MarkNoShow(int id)
+        public async Task<IActionResult> MarkNoShow(Guid id)
         {
             var adminId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
             try
@@ -135,7 +135,7 @@ namespace SalaFinder.Controllers
 
         [HttpGet("audit")]
         [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> GetAuditLogs([FromQuery] int? reservationId = null)
+        public async Task<IActionResult> GetAuditLogs([FromQuery] Guid? reservationId = null)
         {
             var logs = await _reservationService.GetAuditLogsAsync(reservationId);
             return Ok(logs);

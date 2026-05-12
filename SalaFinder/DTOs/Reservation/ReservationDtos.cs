@@ -6,7 +6,7 @@ namespace SalaFinder.DTOs.Reservation
     public class CreateReservationDto
     {
         [Required]
-        public int SpaceId { get; set; }
+        public Guid SpaceId { get; set; }
 
         [Required]
         public DateTime Date { get; set; }
@@ -37,8 +37,8 @@ namespace SalaFinder.DTOs.Reservation
 
     public class ReservationResponseDto
     {
-        public int Id { get; set; }
-        public int SpaceId { get; set; }
+        public Guid Id { get; set; }
+        public Guid SpaceId { get; set; }
         public string SpaceName { get; set; } = string.Empty;
         public string SpaceBuilding { get; set; } = string.Empty;
         public string UserId { get; set; } = string.Empty;
@@ -68,13 +68,13 @@ namespace SalaFinder.DTOs.Reservation
         public TimeSpan StartTime { get; set; }
         public TimeSpan EndTime { get; set; }
         public string SpaceName { get; set; } = string.Empty;
-        public int SpaceId { get; set; }
+        public Guid SpaceId { get; set; }
     }
 
     public class AuditLogResponseDto
     {
-        public int Id { get; set; }
-        public int? ReservationId { get; set; }
+        public Guid Id { get; set; }
+        public Guid? ReservationId { get; set; }
         public string UserFullName { get; set; } = string.Empty;
         public string Action { get; set; } = string.Empty;
         public string Details { get; set; } = string.Empty;
