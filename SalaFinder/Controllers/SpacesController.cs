@@ -34,7 +34,7 @@ namespace SalaFinder.Controllers
 
         [HttpGet("{id}")]
         [AllowAnonymous]
-        public async Task<IActionResult> GetById(int id)
+        public async Task<IActionResult> GetById(Guid id)
         {
             var space = await _spaceService.GetByIdAsync(id);
             return space == null ? NotFound(new { message = $"Espacio con ID {id} no encontrado." }) : Ok(space);
@@ -42,7 +42,7 @@ namespace SalaFinder.Controllers
 
         [HttpGet("{id}/availability")]
         [Authorize]
-        public async Task<IActionResult> GetWeekAvailability(int id, [FromQuery] DateTime weekStart)
+        public async Task<IActionResult> GetWeekAvailability(Guid id, [FromQuery] DateTime weekStart)
         {
             var availability = await _spaceService.GetWeekAvailabilityAsync(id, weekStart);
             return availability == null
@@ -67,7 +67,7 @@ namespace SalaFinder.Controllers
 
         [HttpPut("{id}")]
         [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> Update(int id, [FromBody] UpdateSpaceDto dto)
+        public async Task<IActionResult> Update(Guid id, [FromBody] UpdateSpaceDto dto)
         {
             var updated = await _spaceService.UpdateAsync(id, dto);
             return updated == null ? NotFound(new { message = $"Espacio con ID {id} no encontrado." }) : Ok(updated);
@@ -75,7 +75,7 @@ namespace SalaFinder.Controllers
 
         [HttpDelete("{id}")]
         [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> Delete(int id)
+        public async Task<IActionResult> Delete(Guid id)
         {
             var deleted = await _spaceService.DeleteAsync(id);
             return deleted ? NoContent() : NotFound(new { message = $"Espacio con ID {id} no encontrado." });

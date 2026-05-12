@@ -26,16 +26,15 @@ namespace SalaFinder.Services
             if (!string.IsNullOrEmpty(userId))
                 query = query.Where(r => r.UserId == userId);
 
-            var reservations = await query.OrderByDescending(r => r.CreatedAt).ToListAsync();
-
-            // para que Sqlite funcione correctamente
             if (status.HasValue)
-                reservations = reservations.Where(r => r.Status == status.Value).ToList();
+                query = query.Where(r => r.Status == status.Value);
+
+            var reservations = await query.OrderByDescending(r => r.CreatedAt).ToListAsync();
 
             return reservations.Select(MapToDto).ToList();
         }
 
-        public async Task<ReservationResponseDto?> GetByIdAsync(int id)
+        public async Task<ReservationResponseDto?> GetByIdAsync(Guid id)
         {
             var reservation = await _context.Reservations
                 .Include(r => r.Space)
@@ -46,23 +45,21 @@ namespace SalaFinder.Services
             return reservation == null ? null : MapToDto(reservation);
         }
 
-        public async Task<ConflictInfoDto> CheckConflictAsync(int spaceId, DateTime date, TimeSpan start, TimeSpan end, int? excludeId = null)
+        public async Task<ConflictInfoDto> CheckConflictAsync(Guid spaceId, DateTime date, TimeSpan start, TimeSpan end, Guid? excludeId = null)
         {
-            // se ajusta para Sqlite
-            var allReservations = await _context.Reservations
+            var query = _context.Reservations
                 .Include(r => r.Space)
                 .Include(r => r.User)
-                .Where(r => r.SpaceId == spaceId && r.Date == date.Date)
-                .ToListAsync();
-
-            var conflicts = allReservations
-                .Where(r => r.StartTime < end
+                .Where(r => r.SpaceId == spaceId
+                    && r.Date == date.Date
+                    && r.StartTime < end
                     && r.EndTime > start
-                    && (r.Status == ReservationStatus.Approved || r.Status == ReservationStatus.Pending))
-                .ToList();
+                    && (r.Status == ReservationStatus.Approved || r.Status == ReservationStatus.Pending));
 
             if (excludeId.HasValue)
-                conflicts = conflicts.Where(r => r.Id != excludeId.Value).ToList();
+                query = query.Where(r => r.Id != excludeId.Value);
+
+            var conflicts = await query.ToListAsync();
 
             if (conflicts.Count == 0)
                 return new ConflictInfoDto { HasConflict = false };
@@ -142,7 +139,7 @@ namespace SalaFinder.Services
                 .FirstAsync(r => r.Id == reservation.Id));
         }
 
-        public async Task<ReservationResponseDto?> UpdateStatusAsync(int id, UpdateReservationStatusDto dto, string adminUserId)
+        public async Task<ReservationResponseDto?> UpdateStatusAsync(Guid id, UpdateReservationStatusDto dto, string adminUserId)
         {
             var reservation = await _context.Reservations
                 .Include(r => r.Space)
@@ -185,7 +182,7 @@ namespace SalaFinder.Services
             return MapToDto(reservation);
         }
 
-        public async Task<bool> CancelAsync(int id, string userId)
+        public async Task<bool> CancelAsync(Guid id, string userId)
         {
             var reservation = await _context.Reservations
                 .Include(r => r.User)
@@ -215,7 +212,7 @@ namespace SalaFinder.Services
             return true;
         }
 
-        public async Task<bool> MarkNoShowAsync(int id, string adminUserId)
+        public async Task<bool> MarkNoShowAsync(Guid id, string adminUserId)
         {
             var reservation = await _context.Reservations
                 .Include(r => r.User)
@@ -252,7 +249,7 @@ namespace SalaFinder.Services
             return true;
         }
 
-        public async Task<List<AuditLogResponseDto>> GetAuditLogsAsync(int? reservationId = null)
+        public async Task<List<AuditLogResponseDto>> GetAuditLogsAsync(Guid? reservationId = null)
         {
             var query = _context.AuditLogs
                 .Include(a => a.User)
@@ -278,14 +275,12 @@ namespace SalaFinder.Services
 
         public async Task<bool> CheckAndUnblockUsersAsync()
         {
+            var now = DateTime.UtcNow;
             var blockedUsers = await _context.Users
-                .Where(u => u.IsBlocked)
+                .Where(u => u.IsBlocked
+                    && u.BlockedUntil.HasValue
+                    && u.BlockedUntil.Value <= now)
                 .ToListAsync();
-
-            // para que Sqlite funcione correctamente
-            blockedUsers = blockedUsers
-                .Where(u => u.BlockedUntil.HasValue && u.BlockedUntil.Value <= DateTime.UtcNow)
-                .ToList();
 
             foreach (var user in blockedUsers)
             {
@@ -308,21 +303,18 @@ namespace SalaFinder.Services
             return blockedUsers.Count > 0;
         }
 
-        private async Task<List<AlternativeSlotDto>> FindAlternativeSlotsAsync(int spaceId, DateTime date, TimeSpan duration)
+        private async Task<List<AlternativeSlotDto>> FindAlternativeSlotsAsync(Guid spaceId, DateTime date, TimeSpan duration)
         {
             var alternatives = new List<AlternativeSlotDto>();
             var space = await _context.Spaces.FindAsync(spaceId);
             if (space == null) return alternatives;
 
-            // se ajusta para Sqlite
-            var allReservations = await _context.Reservations
-                .Where(r => r.SpaceId == spaceId && r.Date == date.Date)
-                .ToListAsync();
-
-            var reservations = allReservations
-                .Where(r => r.Status == ReservationStatus.Approved || r.Status == ReservationStatus.Pending)
+            var reservations = await _context.Reservations
+                .Where(r => r.SpaceId == spaceId
+                    && r.Date == date.Date
+                    && (r.Status == ReservationStatus.Approved || r.Status == ReservationStatus.Pending))
                 .OrderBy(r => r.StartTime)
-                .ToList();
+                .ToListAsync();
 
             var openTime = new TimeSpan(7, 0, 0);
             var closeTime = new TimeSpan(22, 0, 0);
@@ -351,7 +343,7 @@ namespace SalaFinder.Services
             return alternatives;
         }
 
-        private async Task LogAuditAsync(int? reservationId, string userId, string action, string details, string previousStatus, string newStatus)
+        private async Task LogAuditAsync(Guid? reservationId, string userId, string action, string details, string previousStatus, string newStatus)
         {
             var log = new AuditLog
             {

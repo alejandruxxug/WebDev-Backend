@@ -73,17 +73,17 @@ namespace SalaFinder.Controllers
                 return Unauthorized(new { message = "Credenciales inválidas." });
 
             var roles = await _userManager.GetRolesAsync(user);
-            var role = roles.FirstOrDefault() ?? "Student";
+            if (roles.Count == 0) roles = new List<string> { "Student" };
 
             var expiresAt = DateTime.UtcNow.AddHours(8);
-            var token = GenerateToken(user, role, expiresAt);
+            var token = GenerateToken(user, roles, expiresAt);
 
             return Ok(new AuthResponseDto
             {
                 Token = token,
                 Email = user.Email!,
                 FullName = user.FullName,
-                Role = role,
+                Role = roles[0],
                 ExpiresAt = expiresAt
             });
         }
@@ -129,16 +129,21 @@ namespace SalaFinder.Controllers
             return Ok(users);
         }
 
-        private string GenerateToken(ApplicationUser user, string role, DateTime expiresAt)
+        private string GenerateToken(ApplicationUser user, IList<string> roles, DateTime expiresAt)
         {
-            var claims = new[]
+            var claims = new List<Claim>
             {
                 new Claim(ClaimTypes.NameIdentifier, user.Id),
                 new Claim(ClaimTypes.Email, user.Email!),
                 new Claim(ClaimTypes.Name, user.FullName),
-                new Claim(ClaimTypes.Role, role),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
             };
+
+            // === Roles → claims ===
+            // Un Claim por rol para que [Authorize(Roles = "...")] funcione
+            // si el usuario tiene multiples roles asignados.
+            foreach (var role in roles)
+                claims.Add(new Claim(ClaimTypes.Role, role));
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
