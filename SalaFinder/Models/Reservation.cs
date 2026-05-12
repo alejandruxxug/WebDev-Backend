@@ -14,10 +14,12 @@ namespace SalaFinder.Models
 
     public class Reservation
     {
-        public int Id { get; set; }
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public Guid Id { get; set; }
 
         [Required]
-        public int SpaceId { get; set; }
+        public Guid SpaceId { get; set; }
         public Space Space { get; set; } = null!;
 
         [Required]

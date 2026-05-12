@@ -16,7 +16,7 @@ builder.Services.AddOpenApi();
 builder.Services.AddControllers();
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseSqlite(
+    options.UseSqlServer(
         builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
@@ -71,10 +71,15 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-using (var scope = app.Services.CreateScope()) // para que Sqlite funcione
+// === Aplicar migraciones + sembrar datos demo al iniciar ===
+using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     db.Database.Migrate();
+
+    // === SEED: poblar la BD con usuarios y reservas demo ===
+    // Idempotente; ver SalaFinder.Data.DbSeeder para detalles.
+    await DbSeeder.SeedAsync(scope.ServiceProvider);
 }
 
 app.Run();

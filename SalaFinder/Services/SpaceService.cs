@@ -38,7 +38,7 @@ namespace SalaFinder.Services
             return spaces.Select(MapToDto).ToList();
         }
 
-        public async Task<SpaceResponseDto?> GetByIdAsync(int id)
+        public async Task<SpaceResponseDto?> GetByIdAsync(Guid id)
         {
             var space = await _context.Spaces.FindAsync(id);
             return space == null ? null : MapToDto(space);
@@ -69,7 +69,7 @@ namespace SalaFinder.Services
             return MapToDto(space);
         }
 
-        public async Task<SpaceResponseDto?> UpdateAsync(int id, UpdateSpaceDto dto)
+        public async Task<SpaceResponseDto?> UpdateAsync(Guid id, UpdateSpaceDto dto)
         {
             var space = await _context.Spaces.FindAsync(id);
             if (space == null) return null;
@@ -87,7 +87,7 @@ namespace SalaFinder.Services
             return MapToDto(space);
         }
 
-        public async Task<bool> DeleteAsync(int id)
+        public async Task<bool> DeleteAsync(Guid id)
         {
             var space = await _context.Spaces.FindAsync(id);
             if (space == null) return false;
@@ -97,21 +97,19 @@ namespace SalaFinder.Services
             return true;
         }
 
-        public async Task<SpaceAvailabilityDto?> GetWeekAvailabilityAsync(int spaceId, DateTime weekStart)
+        public async Task<SpaceAvailabilityDto?> GetWeekAvailabilityAsync(Guid spaceId, DateTime weekStart)
         {
             var space = await _context.Spaces.FindAsync(spaceId);
             if (space == null) return null;
 
             var weekEnd = weekStart.AddDays(7);
 
-            // para que Sqlite funcione correctamente
-            var allReservations = await _context.Reservations
-                .Where(r => r.SpaceId == spaceId && r.Date >= weekStart && r.Date < weekEnd)
+            var reservations = await _context.Reservations
+                .Where(r => r.SpaceId == spaceId
+                    && r.Date >= weekStart
+                    && r.Date < weekEnd
+                    && (r.Status == ReservationStatus.Approved || r.Status == ReservationStatus.Pending))
                 .ToListAsync();
-
-            var reservations = allReservations
-                .Where(r => r.Status == ReservationStatus.Approved || r.Status == ReservationStatus.Pending)
-                .ToList();
 
             var slots = new List<AvailabilitySlotDto>();
             var openTime = new TimeSpan(7, 0, 0);
@@ -146,17 +144,13 @@ namespace SalaFinder.Services
 
             var allSpaces = await GetAllAsync(filter);
 
-            // para que Sqlite funcione correctamente
-            var allReservations = await _context.Reservations
-                .Where(r => r.Date.Date == filter.Date.Value.Date)
-                .ToListAsync();
-
-            var reservedSpaceIds = allReservations
-                .Where(r => r.StartTime < filter.EndTime.Value
+            var reservedSpaceIds = await _context.Reservations
+                .Where(r => r.Date.Date == filter.Date.Value.Date
+                    && r.StartTime < filter.EndTime.Value
                     && r.EndTime > filter.StartTime.Value
                     && (r.Status == ReservationStatus.Approved || r.Status == ReservationStatus.Pending))
                 .Select(r => r.SpaceId)
-                .ToList();
+                .ToListAsync();
 
             return allSpaces.Where(s => !reservedSpaceIds.Contains(s.Id)).ToList();
         }
