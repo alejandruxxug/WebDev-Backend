@@ -482,7 +482,19 @@ $RECYCLE.BIN/
 *.swp
 
 *.db
-appsettings.Development.json
+
+# Secrets — every appsettings*.json except the committed template
+appsettings.json
+appsettings.*.json
+!appsettings.Example.json
+
+# Local user secrets / publish profiles
+secrets.json
+*.PublishSettings
+PublishProfiles/
 
 # Claude Code
 .claude/
+
+# Project notes — keep local only
+CLAUDE.md
