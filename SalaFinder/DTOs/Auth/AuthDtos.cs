@@ -41,4 +41,31 @@ namespace SalaFinder.DTOs.Auth
         public string Role { get; set; } = string.Empty;
         public DateTime ExpiresAt { get; set; }
     }
+
+    public class ChangeRoleDto
+    {
+        [Required]
+        public string NewRole { get; set; } = string.Empty;
+
+        [Required]
+        [StringLength(500)]
+        public string Reason { get; set; } = string.Empty;
+    }
+
+    public class LockUserDto
+    {
+        [Required]
+        public DateTime BlockedUntil { get; set; }
+
+        [Required]
+        [StringLength(500)]
+        public string Reason { get; set; } = string.Empty;
+    }
+
+    public class UnlockUserDto
+    {
+        [Required]
+        [StringLength(500)]
+        public string Reason { get; set; } = string.Empty;
+    }
 }

@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using SalaFinder.Data;
 using SalaFinder.DTOs.Auth;
 using SalaFinder.Models;
 using System.IdentityModel.Tokens.Jwt;
@@ -17,15 +19,18 @@ namespace SalaFinder.Controllers
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly RoleManager<IdentityRole> _roleManager;
         private readonly IConfiguration _config;
+        private readonly ApplicationDbContext _context;
 
         public AuthController(
             UserManager<ApplicationUser> userManager,
             RoleManager<IdentityRole> roleManager,
-            IConfiguration config)
+            IConfiguration config,
+            ApplicationDbContext context)
         {
             _userManager = userManager;
             _roleManager = roleManager;
             _config = config;
+            _context = context;
         }
 
         [HttpPost("register")]
@@ -113,20 +118,155 @@ namespace SalaFinder.Controllers
 
         [HttpGet("users")]
         [Authorize(Roles = "Admin")]
-        public IActionResult GetAllUsers()
+        public async Task<IActionResult> GetAllUsers()
         {
-            var users = _userManager.Users.Select(u => new
+            var users = await _userManager.Users.ToListAsync();
+            var result = new List<object>();
+            foreach (var u in users)
             {
-                u.Id,
-                u.FullName,
-                u.Email,
-                u.Program,
-                u.IsBlocked,
-                u.BlockedUntil,
-                u.NoShowCount
-            }).ToList();
+                var roles = await _userManager.GetRolesAsync(u);
+                result.Add(new
+                {
+                    u.Id,
+                    u.FullName,
+                    u.Email,
+                    u.Program,
+                    u.IsBlocked,
+                    u.BlockedUntil,
+                    u.NoShowCount,
+                    Role = roles.FirstOrDefault() ?? "Student"
+                });
+            }
+            return Ok(result);
+        }
 
-            return Ok(users);
+        [HttpPatch("users/{id}/role")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> ChangeRole(string id, [FromBody] ChangeRoleDto dto)
+        {
+            var allowedRoles = new[] { "Student", "Staff", "Admin" };
+            if (!allowedRoles.Contains(dto.NewRole))
+                return BadRequest(new { message = "Rol inválido. Debe ser: Student, Staff o Admin." });
+
+            var currentAdminId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (id == currentAdminId)
+                return BadRequest(new { message = "No puedes cambiar tu propio rol." });
+
+            var user = await _userManager.FindByIdAsync(id);
+            if (user == null) return NotFound(new { message = "Usuario no encontrado." });
+
+            var existingRoles = await _userManager.GetRolesAsync(user);
+            var oldRole = existingRoles.FirstOrDefault() ?? "Student";
+
+            if (oldRole == dto.NewRole)
+                return BadRequest(new { message = "El usuario ya tiene ese rol." });
+
+            if (oldRole == "Admin" && dto.NewRole != "Admin")
+            {
+                var admins = await _userManager.GetUsersInRoleAsync("Admin");
+                if (admins.Count <= 1)
+                    return BadRequest(new { message = "No puedes degradar al último administrador." });
+            }
+
+            if (existingRoles.Count > 0)
+            {
+                var removeResult = await _userManager.RemoveFromRolesAsync(user, existingRoles);
+                if (!removeResult.Succeeded)
+                    return BadRequest(new { errors = removeResult.Errors.Select(e => e.Description) });
+            }
+
+            if (!await _roleManager.RoleExistsAsync(dto.NewRole))
+                await _roleManager.CreateAsync(new IdentityRole(dto.NewRole));
+
+            var addResult = await _userManager.AddToRoleAsync(user, dto.NewRole);
+            if (!addResult.Succeeded)
+                return BadRequest(new { errors = addResult.Errors.Select(e => e.Description) });
+
+            await LogAuditAsync(
+                userId: currentAdminId!,
+                action: "ROLE_CHANGED",
+                details: $"{user.Email}: {dto.Reason}",
+                previousStatus: oldRole,
+                newStatus: dto.NewRole
+            );
+
+            return Ok(new { message = "Rol actualizado." });
+        }
+
+        [HttpPost("users/{id}/lock")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> LockUser(string id, [FromBody] LockUserDto dto)
+        {
+            var currentAdminId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (id == currentAdminId)
+                return BadRequest(new { message = "No puedes bloquearte a ti mismo." });
+
+            if (dto.BlockedUntil <= DateTime.UtcNow)
+                return BadRequest(new { message = "La fecha de bloqueo debe ser futura." });
+
+            var user = await _userManager.FindByIdAsync(id);
+            if (user == null) return NotFound(new { message = "Usuario no encontrado." });
+
+            var roles = await _userManager.GetRolesAsync(user);
+            if (roles.Contains("Admin"))
+                return BadRequest(new { message = "No puedes bloquear a un administrador." });
+
+            user.BlockedUntil = dto.BlockedUntil;
+            var updateResult = await _userManager.UpdateAsync(user);
+            if (!updateResult.Succeeded)
+                return BadRequest(new { errors = updateResult.Errors.Select(e => e.Description) });
+
+            await LogAuditAsync(
+                userId: currentAdminId!,
+                action: "USER_LOCKED",
+                details: $"{user.Email} bloqueado hasta {dto.BlockedUntil:o}: {dto.Reason}",
+                previousStatus: "",
+                newStatus: ""
+            );
+
+            return Ok(new { message = "Usuario bloqueado." });
+        }
+
+        [HttpPost("users/{id}/unlock")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> UnlockUser(string id, [FromBody] UnlockUserDto dto)
+        {
+            var currentAdminId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            var user = await _userManager.FindByIdAsync(id);
+            if (user == null) return NotFound(new { message = "Usuario no encontrado." });
+
+            user.BlockedUntil = null;
+            user.NoShowCount = 0;
+            var updateResult = await _userManager.UpdateAsync(user);
+            if (!updateResult.Succeeded)
+                return BadRequest(new { errors = updateResult.Errors.Select(e => e.Description) });
+
+            await LogAuditAsync(
+                userId: currentAdminId!,
+                action: "USER_UNLOCKED",
+                details: $"{user.Email}: {dto.Reason}",
+                previousStatus: "",
+                newStatus: ""
+            );
+
+            return Ok(new { message = "Usuario desbloqueado." });
+        }
+
+        private async Task LogAuditAsync(string userId, string action, string details, string previousStatus, string newStatus)
+        {
+            var log = new AuditLog
+            {
+                ReservationId = null,
+                UserId = userId,
+                Action = action,
+                Details = details,
+                PreviousStatus = previousStatus,
+                NewStatus = newStatus,
+                Timestamp = DateTime.UtcNow
+            };
+            _context.AuditLogs.Add(log);
+            await _context.SaveChangesAsync();
         }
 
         private string GenerateToken(ApplicationUser user, IList<string> roles, DateTime expiresAt)

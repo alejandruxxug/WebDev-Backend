@@ -81,7 +81,7 @@ namespace SalaFinder.Controllers
         }
 
         [HttpPatch("{id}/status")]
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,Staff")]
         public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateReservationStatusDto dto)
         {
             var adminId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;

@@ -8,12 +8,20 @@ using SalaFinder.Interfaces;
 using SalaFinder.Models;
 using SalaFinder.Services;
 using System.Text;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // The frontend serializes enums as strings ("Approved", "Rejected", ...).
+        // Without this converter the default System.Text.Json binder expects numeric
+        // values and rejects the payload with a 400 on PATCH /reservations/{id}/status.
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    });
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(
@@ -101,17 +109,32 @@ app.MapControllers();
 
 // === Aplicar migraciones + sembrar datos demo al iniciar ===
 // En Azure SQL Serverless la BD puede estar auto-pausada; el primer intento
-// suele fallar mientras la BD "despierta" (~30-60s). Usamos la execution
-// strategy de EF Core para reintentar de forma transparente.
-using (var scope = app.Services.CreateScope())
+// suele fallar mientras la BD "despierta" (~30-60s) con un TCP reset durante
+// el TLS handshake. NO debe matar el proceso: si lo hace, el App Service
+// devuelve 503 sin headers CORS y el navegador reporta "CORS error".
+// Intentamos migrar en background; si falla, el primer request real lo
+// reintentará vía la execution strategy de EF Core (EnableRetryOnFailure).
+_ = Task.Run(async () =>
 {
+    var logger = app.Services.GetRequiredService<ILogger<Program>>();
+    using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    var strategy = db.Database.CreateExecutionStrategy();
-    await strategy.ExecuteAsync(async () =>
+    try
     {
-        db.Database.Migrate();
-        await DbSeeder.SeedAsync(scope.ServiceProvider);
-    });
-}
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await db.Database.MigrateAsync();
+            await DbSeeder.SeedAsync(scope.ServiceProvider);
+        });
+        logger.LogInformation("Database migration and seed completed.");
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex,
+            "Startup DB migration/seed failed. App will continue serving; " +
+            "next DB-touching request will retry via EF Core retry strategy.");
+    }
+});
 
 app.Run();

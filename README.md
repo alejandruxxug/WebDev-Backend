@@ -2,12 +2,20 @@
 
 API REST en **ASP.NET Core 10** para la reserva de aulas, laboratorios y canchas universitarias. Maneja autenticación con **ASP.NET Identity + JWT**, persistencia con **EF Core 10 + SQL Server**, control de roles (Admin / Staff / Student) y un flujo de aprobación de reservas con auditoría y política de no-shows.
 
+> Para una guía detallada del comportamiento y reglas de negocio orientada a sustentación oral, ver [`../WebDev-SalaFinder/presentation.md`](../WebDev-SalaFinder/presentation.md).
+
+## Despliegue en producción
+
+- API: **https://salafindereia.azurewebsites.net** (Azure App Service Linux, B1)
+- BD: **Azure SQL Database serverless** (`salafinderdb.database.windows.net`)
+- Frontend que la consume: **https://web-dev-sala-finder.vercel.app**
+
 ## Stack
 
 - .NET 10 / ASP.NET Core 10 (`net10.0`)
 - Entity Framework Core 10 (`Microsoft.EntityFrameworkCore.SqlServer`)
 - ASP.NET Identity + JWT Bearer (`Microsoft.AspNetCore.Identity.EntityFrameworkCore`, `Microsoft.AspNetCore.Authentication.JwtBearer`)
-- SQL Server 2022 (vía Docker en local)
+- SQL Server 2022 (vía Docker en local) / Azure SQL Database serverless (producción)
 - Scalar para la UI de OpenAPI
 
 ## Prerequisitos
@@ -28,13 +36,19 @@ docker run -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=Tu_Password_Aqui" \
 
 ### 2. Configurar la cadena de conexión
 
-Edita `SalaFinder/appsettings.json` con el password que usaste arriba:
+`appsettings.json` está **gitignored** (contiene secretos). Copia la plantilla y edita con tu password:
+
+```bash
+cp SalaFinder/appsettings.Example.json SalaFinder/appsettings.json
+```
 
 ```json
 "ConnectionStrings": {
   "DefaultConnection": "Server=localhost,1433;Database=SalaFinderDB;User Id=sa;Password=Tu_Password_Aqui;TrustServerCertificate=True;Encrypt=False;"
 }
 ```
+
+`appsettings.Example.json` queda versionado como referencia con placeholders.
 
 ### 3. Restaurar paquetes y correr
 
@@ -71,14 +85,13 @@ dotnet ef migrations remove --project SalaFinder
 
 ### Vía `DbSeeder` (en runtime, después de migrar)
 
-| Email | Password | Rol |
-|---|---|---|
-| `admin@salafinder.com` | `Admin1234` | Admin |
-| `staff@salafinder.com` | `Staff1234` | Staff |
-| `student1@salafinder.com` | `Student1234` | Student |
-| `student2@salafinder.com` | `Student1234` | Student |
+15 usuarios `@eia.edu.co`, todos con password `Sala1234`:
 
-Más 3 reservas de ejemplo (Approved / Pending / NoShow). El seeder es idempotente: no duplica si ya existen.
+- **2 Admin** — `admin@eia.edu.co`, `admin2@eia.edu.co`
+- **2 Staff** — `staff1@eia.edu.co`, `staff2@eia.edu.co`
+- **11 Student** — `student1@eia.edu.co` … `student11@eia.edu.co`
+
+Más **30 reservas** distribuidas en 6 fechas × 6 espacios con mezcla de estados (Pending / Approved / Rejected / Cancelled / NoShow) y **20 registros de auditoría** que reflejan las transiciones. El seeder es idempotente: chequea existencia antes de insertar.
 
 > Credenciales solo para desarrollo. **No** dejarlas en producción.
 
@@ -120,6 +133,73 @@ Capas: **Controllers → Interfaces → Services → ApplicationDbContext (EF Co
 4. Si `Space.RequiresApproval == false`, la reserva nace como `Approved`; si no, como `Pending`.
 5. Al marcar `NoShow` se incrementa `User.NoShowCount`; al llegar a 2, el usuario queda bloqueado por 7 días.
 6. Solo el dueño puede cancelar su reserva; los admins rechazan vía el endpoint de status.
+
+## Producción — Azure App Service + Azure SQL Serverless
+
+### Deploy
+
+Se publica desde Rider (plugin **Azure Toolkit for Rider** → click derecho en `SalaFinder` → **Azure** → **Publish**). Empaqueta la build de Release y la sube al App Service vía Zip Deploy. Ese flujo sube los archivos del working tree (incluyendo `appsettings.json` con credenciales locales), por eso **las credenciales reales de producción deben vivir en Azure App Settings, no en el archivo**.
+
+### Configuración (App Service → Configuration → Application settings)
+
+Linux usa la sintaxis de doble guion bajo:
+
+| Key | Valor |
+|---|---|
+| `ConnectionStrings__DefaultConnection` | Connection string completa de Azure SQL (con `Encrypt=True`) |
+| `Jwt__Key` | Clave HMAC (idéntica a la de `appsettings.json` local) |
+| `Jwt__Issuer` | `SalaFinderApi` |
+| `Jwt__Audience` | `SalaFinderUsers` |
+| `Cors__AllowedOrigins__0` | `https://web-dev-sala-finder.vercel.app` |
+| `Cors__AllowedOrigins__1` | (opcional) `http://localhost:5173` |
+
+### Firewall de Azure SQL
+
+En el **SQL Server** (no la BD) → **Security → Networking** → activar **"Allow Azure services and resources to access this server"**. Sin esto, el App Service no logra abrir la conexión TLS y el proceso muere al arrancar.
+
+### Resiliencia para auto-pause (Azure SQL serverless)
+
+Azure SQL Serverless pausa la BD tras inactividad. El primer request post-pausa tarda 30–60s y mientras tanto el servidor devuelve "database not currently available". `Program.cs` configura:
+
+```csharp
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
+    options.UseSqlServer(connectionString,
+        sql => sql.EnableRetryOnFailure(
+            maxRetryCount: 8,
+            maxRetryDelay: TimeSpan.FromSeconds(15),
+            errorNumbersToAdd: null)));
+```
+
+Y la `Database.Migrate()` de arranque se envuelve en la execution strategy de EF Core para reintentar de forma transparente:
+
+```csharp
+var strategy = db.Database.CreateExecutionStrategy();
+await strategy.ExecuteAsync(async () =>
+{
+    db.Database.Migrate();
+    await DbSeeder.SeedAsync(scope.ServiceProvider);
+});
+```
+
+### CORS
+
+El middleware se registra leyendo orígenes de configuración y se monta **antes** de `UseAuthentication` (para que el preflight `OPTIONS` no exija JWT):
+
+```csharp
+var allowedOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+if (allowedOrigins.Length == 0)
+    allowedOrigins = new[] { "http://localhost:5173" };  // fallback de desarrollo
+
+builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
+    .WithOrigins(allowedOrigins)
+    .AllowAnyHeader()
+    .AllowAnyMethod()));
+
+// ...
+app.UseCors();
+app.UseAuthentication();
+```
 
 ## Hecho por
 
