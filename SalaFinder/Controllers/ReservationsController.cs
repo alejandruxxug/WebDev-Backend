@@ -116,7 +116,7 @@ namespace SalaFinder.Controllers
         }
 
         [HttpPost("{id}/no-show")]
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,Staff")]
         public async Task<IActionResult> MarkNoShow(Guid id)
         {
             var adminId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
