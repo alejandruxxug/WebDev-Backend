@@ -303,6 +303,15 @@ namespace SalaFinder.Services
             return blockedUsers.Count > 0;
         }
 
+        private static readonly (TimeSpan Start, TimeSpan End)[] BookableSlots =
+        {
+            (new TimeSpan(9, 0, 0), new TimeSpan(10, 0, 0)),
+            (new TimeSpan(10, 0, 0), new TimeSpan(11, 0, 0)),
+            (new TimeSpan(11, 0, 0), new TimeSpan(12, 0, 0)),
+            (new TimeSpan(14, 0, 0), new TimeSpan(15, 0, 0)),
+            (new TimeSpan(15, 0, 0), new TimeSpan(16, 0, 0)),
+        };
+
         private async Task<List<AlternativeSlotDto>> FindAlternativeSlotsAsync(Guid spaceId, DateTime date, TimeSpan duration)
         {
             var alternatives = new List<AlternativeSlotDto>();
@@ -316,28 +325,22 @@ namespace SalaFinder.Services
                 .OrderBy(r => r.StartTime)
                 .ToListAsync();
 
-            var openTime = new TimeSpan(7, 0, 0);
-            var closeTime = new TimeSpan(22, 0, 0);
-            var current = openTime;
-
-            while (current + duration <= closeTime && alternatives.Count < 3)
+            foreach (var (start, end) in BookableSlots)
             {
-                var slotEnd = current + duration;
-                var hasConflict = reservations.Any(r => r.StartTime < slotEnd && r.EndTime > current);
+                if (alternatives.Count >= 3) break;
+                if (end - start != duration) continue;
 
-                if (!hasConflict)
+                var hasConflict = reservations.Any(r => r.StartTime < end && r.EndTime > start);
+                if (hasConflict) continue;
+
+                alternatives.Add(new AlternativeSlotDto
                 {
-                    alternatives.Add(new AlternativeSlotDto
-                    {
-                        Date = date,
-                        StartTime = current,
-                        EndTime = slotEnd,
-                        SpaceName = space.Name,
-                        SpaceId = spaceId
-                    });
-                }
-
-                current = current.Add(TimeSpan.FromMinutes(30));
+                    Date = date,
+                    StartTime = start,
+                    EndTime = end,
+                    SpaceName = space.Name,
+                    SpaceId = spaceId
+                });
             }
 
             return alternatives;
